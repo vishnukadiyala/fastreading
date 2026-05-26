@@ -94,8 +94,15 @@ function tokenize(text) {
 
   const tokens = [];
   sentences.forEach((sentence, sIdx) => {
-    const words = sentence.split(/\s+/).filter(Boolean);
-    for (const w of words) tokens.push({ word: w, sentenceIdx: sIdx });
+    const rawWords = sentence.split(/\s+/).filter(Boolean);
+    for (const raw of rawWords) {
+      const trailing = raw.match(/[^\p{L}\p{N}]+$/u);
+      const trailingPunct = trailing ? trailing[0] : "";
+      const word = raw.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
+      if (!word) continue;
+      const endsClause = /[,;:]/.test(trailingPunct);
+      tokens.push({ word, sentenceIdx: sIdx, endsClause });
+    }
   });
 
   return { tokens, sentences };
@@ -109,13 +116,13 @@ function baseDelay() {
   return (60000 / wpm) * chunkSize;
 }
 
-// Words with punctuation, long words, sentence boundaries get a slight pause.
+// Long words, clause endings, and sentence boundaries get a slight pause.
 function dwellMultiplier(token, nextToken) {
   let m = 1;
   if (token.word.length >= 8) m *= 1.15;
-  if (/[.!?]$/.test(token.word)) m *= 1.6;
-  else if (/[,;:]$/.test(token.word)) m *= 1.25;
-  if (nextToken && nextToken.sentenceIdx !== token.sentenceIdx) m *= 1.3;
+  const endsSentence = nextToken ? nextToken.sentenceIdx !== token.sentenceIdx : false;
+  if (endsSentence) m *= 2.2;
+  else if (token.endsClause) m *= 1.3;
   return m;
 }
 
