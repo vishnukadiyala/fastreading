@@ -13,6 +13,11 @@
 </header>
 
 <main>
+  <section id="library" class="library hidden">
+    <h2 class="library-title">Recent papers</h2>
+    <ul id="library-list" class="library-list"></ul>
+  </section>
+
   <section id="drop-zone" class="drop-zone">
     <input type="file" id="file-input" accept="application/pdf,text/plain" hidden />
     <label for="file-input" class="drop-label">
@@ -31,6 +36,14 @@
 
     <div class="progress">
       <div id="progress-bar" class="progress-bar"></div>
+    </div>
+
+    <div id="refs-bar" class="refs-bar hidden">
+      <label class="refs-toggle">
+        <input type="checkbox" id="include-refs" />
+        <span>Include references</span>
+      </label>
+      <span id="refs-info" class="refs-info"></span>
     </div>
 
     <div class="controls">
