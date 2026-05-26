@@ -8,8 +8,13 @@
 </head>
 <body>
 <header>
-  <h1>fastreading</h1>
-  <p class="tagline">RSVP speed reader for research papers. Drop a PDF, focus on the red anchor.</p>
+  <div class="header-row">
+    <div>
+      <h1>fastreading</h1>
+      <p class="tagline">RSVP speed reader for research papers. Drop a PDF, focus on the red anchor.</p>
+    </div>
+    <button id="open-settings" class="btn ghost settings-btn" type="button">Settings</button>
+  </div>
 </header>
 
 <main>
@@ -25,6 +30,26 @@
       <span>or click to choose a file</span>
     </label>
     <p id="status" class="status"></p>
+  </section>
+
+  <section id="outline" class="outline hidden">
+    <div class="outline-header">
+      <div class="outline-titles">
+        <h2 id="outline-title" class="outline-title"></h2>
+        <span id="outline-meta" class="outline-meta"></span>
+      </div>
+      <div class="outline-actions">
+        <button id="outline-read-all" class="btn primary" type="button">Read full paper</button>
+        <button id="outline-back" class="btn ghost" type="button">&larr; Library</button>
+      </div>
+    </div>
+
+    <div id="ai-bar" class="ai-bar">
+      <span id="ai-status" class="ai-status"></span>
+      <button id="summarize-all" class="btn" type="button">Summarize all sections</button>
+    </div>
+
+    <ul id="outline-sections" class="outline-sections"></ul>
   </section>
 
   <section id="reader" class="reader hidden">
@@ -70,6 +95,7 @@
         </select>
       </label>
 
+      <button id="back-to-outline" class="btn">&larr; Outline</button>
       <button id="reset" class="btn ghost">Load another</button>
     </div>
 
@@ -79,6 +105,26 @@
     </details>
   </section>
 </main>
+
+<dialog id="settings-dialog" class="settings-dialog">
+  <form method="dialog" class="settings-form">
+    <h3>Settings</h3>
+    <label class="settings-field">
+      <span>Anthropic API key</span>
+      <input type="password" id="api-key-input" placeholder="sk-ant-..." autocomplete="off" spellcheck="false" />
+      <small>
+        Stored only in your browser (localStorage) and sent directly to the Anthropic API
+        for section summaries (Haiku 4.5). Get a key at
+        <a href="https://console.anthropic.com/" target="_blank" rel="noopener">console.anthropic.com</a>.
+      </small>
+    </label>
+    <div class="settings-actions">
+      <button type="button" id="settings-clear" class="btn ghost">Clear key</button>
+      <button type="button" id="settings-cancel" class="btn">Cancel</button>
+      <button type="button" id="settings-save" class="btn primary">Save</button>
+    </div>
+  </form>
+</dialog>
 
 <footer>
   <small>

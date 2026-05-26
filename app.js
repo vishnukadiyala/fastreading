@@ -9,6 +9,16 @@ const els = {
   dropZone: document.getElementById("drop-zone"),
   fileInput: document.getElementById("file-input"),
   status: document.getElementById("status"),
+
+  outline: document.getElementById("outline"),
+  outlineTitle: document.getElementById("outline-title"),
+  outlineMeta: document.getElementById("outline-meta"),
+  outlineSections: document.getElementById("outline-sections"),
+  outlineReadAll: document.getElementById("outline-read-all"),
+  outlineBack: document.getElementById("outline-back"),
+  aiStatus: document.getElementById("ai-status"),
+  summarizeAll: document.getElementById("summarize-all"),
+
   reader: document.getElementById("reader"),
   wordDisplay: document.getElementById("word-display"),
   progressBar: document.getElementById("progress-bar"),
@@ -22,10 +32,18 @@ const els = {
   chunkVal: document.getElementById("chunk-val"),
   mode: document.getElementById("mode"),
   reset: document.getElementById("reset"),
+  backToOutline: document.getElementById("back-to-outline"),
   contextText: document.getElementById("context-text"),
   refsBar: document.getElementById("refs-bar"),
   refsInfo: document.getElementById("refs-info"),
   includeRefs: document.getElementById("include-refs"),
+
+  openSettings: document.getElementById("open-settings"),
+  settingsDialog: document.getElementById("settings-dialog"),
+  apiKeyInput: document.getElementById("api-key-input"),
+  settingsSave: document.getElementById("settings-save"),
+  settingsCancel: document.getElementById("settings-cancel"),
+  settingsClear: document.getElementById("settings-clear"),
 };
 
 const state = {
@@ -34,20 +52,31 @@ const state = {
   index: 0,
   playing: false,
   timerId: null,
-  // Source-of-truth text (so we can re-tokenize when the refs toggle changes)
+
+  // Source-of-truth text and metadata.
   mainText: "",
   refsText: "",
   includeRefs: false,
   currentEntryId: null,
   currentName: "",
+
+  // Sections and reading scope. scopeStart/scopeEnd are token indices into
+  // state.tokens; they're equal to [0, tokens.length] for "full paper" reads
+  // and narrowed when the user drops into a single section.
+  sections: [],
+  scopeStart: 0,
+  scopeEnd: 0,
+  scopeTitle: "",
 };
 
 // ---------- Storage ----------
 const STORAGE = {
   library: "fastreading.library",
   settings: "fastreading.settings",
+  apiKey: "fastreading.apiKey",
 };
 const MAX_LIBRARY = 10;
+const MODEL = "claude-haiku-4-5";
 
 function loadSettings() {
   try {
@@ -63,6 +92,18 @@ function saveSettings() {
     mode: els.mode.value,
   };
   try { localStorage.setItem(STORAGE.settings, JSON.stringify(s)); } catch {}
+}
+
+function loadApiKey() {
+  try { return localStorage.getItem(STORAGE.apiKey) || ""; }
+  catch { return ""; }
+}
+
+function saveApiKey(key) {
+  try {
+    if (key) localStorage.setItem(STORAGE.apiKey, key);
+    else localStorage.removeItem(STORAGE.apiKey);
+  } catch {}
 }
 
 function loadLibrary() {
@@ -88,7 +129,6 @@ function upsertLibraryEntry(entry) {
   else lib.unshift(entry);
   lib.sort((a, b) => (b.lastReadAt || 0) - (a.lastReadAt || 0));
 
-  // Trim to size, then drop oldest if we hit quota.
   while (lib.length > MAX_LIBRARY) lib.pop();
   while (!writeLibrary(lib) && lib.length > 1) lib.pop();
   renderLibrary();
@@ -219,25 +259,29 @@ function dwellMultiplier(token, nextToken) {
   return m;
 }
 
-// ---------- Playback ----------
+// ---------- Playback (scope-aware) ----------
 function showCurrent() {
   const mode = els.mode.value;
   const chunkSize = Number(els.chunk.value);
 
-  if (state.index >= state.tokens.length) {
+  if (state.index >= state.scopeEnd) {
     setPlaying(false);
-    els.wordDisplay.innerHTML = `<span class="placeholder">End of document. Press Restart.</span>`;
+    const msg = state.scopeTitle ? `End of "${state.scopeTitle}".` : "End of document.";
+    els.wordDisplay.innerHTML = `<span class="placeholder">${escapeHtml(msg)} Press Restart or return to outline.</span>`;
     return;
   }
 
   if (mode === "rsvp" || chunkSize === 1) {
     renderWord(state.tokens[state.index].word);
   } else {
-    const slice = state.tokens.slice(state.index, state.index + chunkSize).map((t) => t.word);
+    const slice = state.tokens.slice(state.index, Math.min(state.index + chunkSize, state.scopeEnd))
+      .map((t) => t.word);
     renderChunk(slice);
   }
 
-  els.progressBar.style.width = `${(state.index / state.tokens.length) * 100}%`;
+  const scopeSize = Math.max(1, state.scopeEnd - state.scopeStart);
+  const localPos = Math.max(0, state.index - state.scopeStart);
+  els.progressBar.style.width = `${(localPos / scopeSize) * 100}%`;
   const sIdx = state.tokens[state.index].sentenceIdx;
   els.contextText.textContent = state.sentences[sIdx] || "";
 }
@@ -253,6 +297,15 @@ function step() {
 
   state.index += stride;
   schedulePositionSave();
+  if (state.index >= state.scopeEnd) {
+    // Final frame already shown by showCurrent; schedule one more tick so the
+    // "end of section" placeholder appears after the last word's dwell.
+    state.timerId = setTimeout(() => {
+      state.timerId = null;
+      showCurrent();
+    }, delay);
+    return;
+  }
   state.timerId = setTimeout(step, delay);
 }
 
@@ -267,7 +320,7 @@ function setPlaying(playing) {
 
 function play() {
   if (state.tokens.length === 0) return;
-  if (state.index >= state.tokens.length) state.index = 0;
+  if (state.index >= state.scopeEnd) state.index = state.scopeStart;
   setPlaying(true);
   step();
 }
@@ -281,7 +334,7 @@ function pause() {
 function jumpSeconds(seconds) {
   const wpm = Number(els.wpm.value);
   const delta = Math.round((wpm / 60) * seconds);
-  state.index = Math.max(0, Math.min(state.tokens.length - 1, state.index + delta));
+  state.index = Math.max(state.scopeStart, Math.min(state.scopeEnd - 1, state.index + delta));
   showCurrent();
   schedulePositionSave();
 }
@@ -306,6 +359,11 @@ function saveCurrentEntry() {
     position: state.index,
     totalTokens: state.tokens.length,
     lastReadAt: Date.now(),
+    // Persist section summaries so they survive a page reload.
+    sectionsCache: state.sections.map((s) => ({
+      title: s.title,
+      summary: s.summary || null,
+    })),
   });
 }
 
@@ -324,18 +382,11 @@ async function extractPdfText(file) {
   return pageTexts.join("\n\n");
 }
 
-// pdf.js returns text items in document order, not visual order, so a paper
-// with two columns gets read as line-1-left, line-1-right, line-2-left, ...
-// We group items by visual column (using x-coordinates) and emit each column
-// top-to-bottom in turn.
 function reflowPageItems(rawItems, pageWidth) {
   const items = rawItems.filter((it) => it && typeof it.str === "string" && it.str.length);
   if (!items.length) return "";
 
   const midX = pageWidth / 2;
-
-  // Detect two-column layout: a meaningful number of items must lie clearly
-  // on EACH side of the page midline.
   let clearLeft = 0, clearRight = 0;
   for (const it of items) {
     const x = it.transform[4];
@@ -369,9 +420,6 @@ function reflowPageItems(rawItems, pageWidth) {
   left.sort(sortYThenX);
   right.sort(sortYThenX);
 
-  // Page-spanning items (titles, full-width headings, full-width tables) get
-  // emitted first; that's not perfect when a wide figure sits mid-page, but
-  // it's far better than the interleaved baseline.
   return [
     joinItemsByLine(spanning),
     joinItemsByLine(left),
@@ -379,7 +427,6 @@ function reflowPageItems(rawItems, pageWidth) {
   ].filter(Boolean).join("\n");
 }
 
-// PDF coordinate y grows upward, so we sort descending y for top-to-bottom.
 function sortYThenX(a, b) {
   const dy = b.transform[5] - a.transform[5];
   if (Math.abs(dy) > 4) return dy;
@@ -405,17 +452,12 @@ function joinItemsByLine(items) {
 
 // ---------- Bibliography split ----------
 function splitReferences(text) {
-  // Look for a line that is just "References" / "Bibliography" / "Works Cited"
-  // (or a numbered variant like "6 References"). Last occurrence wins, since
-  // these words can also appear in earlier prose.
   const re = /(^|\n)[ \t]*(?:\d+[.)]?\s+)?(References|REFERENCES|Bibliography|BIBLIOGRAPHY|Works Cited|WORKS CITED)\s*\n/g;
   let match, lastMatch;
   while ((match = re.exec(text)) !== null) lastMatch = match;
   if (!lastMatch) return { mainText: text, refsText: "" };
   const headingStart = lastMatch.index + lastMatch[1].length;
   const refsStart = lastMatch.index + lastMatch[0].length;
-  // Only treat as references if the section is at least 5% of the document —
-  // otherwise it's likely just a stray heading.
   if (text.length - refsStart < text.length * 0.05) {
     return { mainText: text, refsText: "" };
   }
@@ -425,15 +467,106 @@ function splitReferences(text) {
   };
 }
 
+// ---------- Section detection ----------
+// Heuristic: a line is a section header if it's short and either matches a
+// numbered prefix ("1 Introduction", "2.1 Method") or a known top-level
+// section word. Imperfect on unusual layouts but covers the bulk of papers.
+const KNOWN_HEADINGS = new Set([
+  "abstract", "introduction", "background", "related work",
+  "preliminaries", "methodology", "methods", "method",
+  "approach", "model", "architecture", "experiments",
+  "experimental setup", "setup", "results", "analysis",
+  "evaluation", "discussion", "limitations", "conclusion",
+  "conclusions", "future work", "acknowledgments",
+  "acknowledgements", "appendix",
+]);
+
+const NUMBERED_HEADING = /^(\d+(?:\.\d+){0,3}\.?)\s+([A-Z][A-Za-z][^.]{0,70})$/;
+
+function detectSections(text) {
+  const lines = text.split("\n");
+  const sections = [];
+  let current = { title: "Preamble", lines: [] };
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    let headingTitle = null;
+    if (line.length <= 80) {
+      const cleaned = line.replace(/[^\w\s]/g, "").toLowerCase().trim();
+      if (KNOWN_HEADINGS.has(cleaned)) {
+        headingTitle = line;
+      } else {
+        const m = line.match(NUMBERED_HEADING);
+        if (m) headingTitle = line;
+      }
+    }
+
+    if (headingTitle) {
+      if (current.lines.length > 0) {
+        sections.push({ title: current.title, text: current.lines.join("\n") });
+      }
+      current = { title: headingTitle, lines: [] };
+    } else {
+      current.lines.push(line);
+    }
+  }
+  if (current.lines.length > 0) {
+    sections.push({ title: current.title, text: current.lines.join("\n") });
+  }
+
+  // Drop a tiny preamble; it's usually just title + authors junk.
+  if (sections.length > 1 && sections[0].title === "Preamble" && sections[0].text.length < 200) {
+    sections.shift();
+  }
+  // If detection produced nothing useful, fall back to a single section.
+  if (sections.length === 0) {
+    sections.push({ title: "Full paper", text });
+  }
+  return sections;
+}
+
 // ---------- Reading session ----------
-function applyTokensFromState() {
-  const text = state.includeRefs && state.refsText
-    ? state.mainText + "\n\n" + state.refsText
-    : state.mainText;
-  const { tokens, sentences } = tokenize(text);
-  state.tokens = tokens;
-  state.sentences = sentences;
-  state.index = Math.max(0, Math.min(state.index, Math.max(0, tokens.length - 1)));
+function applyTokensFromState(sectionsCache) {
+  // Detect sections on main text, optionally append References as a section.
+  const detected = detectSections(state.mainText);
+
+  // Merge cached summaries by section title when available.
+  const cacheByTitle = new Map((sectionsCache || []).map((s) => [s.title, s.summary || null]));
+
+  const allTokens = [];
+  const allSentences = [];
+  const sectionList = [];
+
+  const appendBlock = (title, text) => {
+    const { tokens, sentences } = tokenize(text);
+    if (!tokens.length) return;
+    const startIdx = allTokens.length;
+    const sentOffset = allSentences.length;
+    for (const t of tokens) allTokens.push({ ...t, sentenceIdx: t.sentenceIdx + sentOffset });
+    for (const s of sentences) allSentences.push(s);
+    sectionList.push({
+      title,
+      text,
+      startIdx,
+      endIdx: allTokens.length,
+      summary: cacheByTitle.get(title) || null,
+      summarizing: false,
+      error: null,
+    });
+  };
+
+  for (const sec of detected) appendBlock(sec.title, sec.text);
+  if (state.includeRefs && state.refsText) appendBlock("References", state.refsText);
+
+  state.tokens = allTokens;
+  state.sentences = allSentences;
+  state.sections = sectionList;
+  state.scopeStart = 0;
+  state.scopeEnd = allTokens.length;
+  state.scopeTitle = "";
+  state.index = Math.max(0, Math.min(state.index, Math.max(0, allTokens.length - 1)));
 }
 
 function updateRefsBar() {
@@ -447,7 +580,7 @@ function updateRefsBar() {
   els.refsBar.classList.remove("hidden");
 }
 
-function startReading({ entryId, name, mainText, refsText, position, includeRefs }) {
+function startReading({ entryId, name, mainText, refsText, position, includeRefs, sectionsCache }) {
   state.currentEntryId = entryId;
   state.currentName = name;
   state.mainText = mainText || "";
@@ -455,7 +588,7 @@ function startReading({ entryId, name, mainText, refsText, position, includeRefs
   state.includeRefs = Boolean(includeRefs);
   state.index = Number.isFinite(position) ? position : 0;
 
-  applyTokensFromState();
+  applyTokensFromState(sectionsCache);
   if (state.tokens.length === 0) {
     els.status.textContent = "No readable text found in that file.";
     return;
@@ -463,19 +596,224 @@ function startReading({ entryId, name, mainText, refsText, position, includeRefs
 
   els.library.classList.add("hidden");
   els.dropZone.classList.add("hidden");
-  els.reader.classList.remove("hidden");
+  els.reader.classList.add("hidden");
+  els.outline.classList.remove("hidden");
 
   updateRefsBar();
+  renderOutline();
+  saveCurrentEntry();
+}
 
-  if (state.index > 0) {
-    showCurrent();
-  } else {
-    els.wordDisplay.innerHTML = `<span class="placeholder">${state.tokens.length.toLocaleString()} words ready. Press Play.</span>`;
-    els.progressBar.style.width = "0%";
-    els.contextText.textContent = state.sentences[0] || "";
+// ---------- Outline rendering ----------
+function renderOutline() {
+  els.outlineTitle.textContent = state.currentName || "Untitled";
+  const wordCount = state.tokens.length;
+  const sectionCount = state.sections.length;
+  els.outlineMeta.textContent = `${sectionCount} sections · ${wordCount.toLocaleString()} words`;
+
+  updateAiStatus();
+
+  els.outlineSections.innerHTML = state.sections.map((s, idx) => {
+    const wordCount = s.endIdx - s.startIdx;
+    let summaryHtml;
+    if (s.summarizing) {
+      summaryHtml = `<p class="section-summary empty">Summarizing…</p>`;
+    } else if (s.error) {
+      summaryHtml = `<p class="section-summary error">${escapeHtml(s.error)}</p>`;
+    } else if (s.summary) {
+      summaryHtml = `<p class="section-summary">${escapeHtml(s.summary)}</p>`;
+    } else {
+      summaryHtml = `<p class="section-summary empty">No summary yet.</p>`;
+    }
+    return `<li class="outline-section" data-idx="${idx}">
+      <div class="section-row">
+        <h3 class="section-title">${escapeHtml(s.title)}</h3>
+        <span class="section-meta">${wordCount.toLocaleString()} words</span>
+      </div>
+      ${summaryHtml}
+      <div class="section-actions">
+        <button class="btn" data-action="summarize" type="button">${s.summary ? "Re-summarize" : "Summarize"}</button>
+        <button class="btn primary" data-action="read" type="button">Read this section</button>
+      </div>
+    </li>`;
+  }).join("");
+}
+
+function updateAiStatus() {
+  const haveKey = !!loadApiKey();
+  if (!haveKey) {
+    els.aiStatus.textContent = "Add your Anthropic API key in Settings to enable AI section summaries (Haiku 4.5).";
+    els.aiStatus.classList.remove("ok", "error");
+    els.summarizeAll.disabled = true;
+    els.summarizeAll.style.opacity = "0.5";
+    return;
+  }
+  const done = state.sections.filter((s) => s.summary).length;
+  els.aiStatus.textContent = `API key set. ${done} of ${state.sections.length} sections summarized.`;
+  els.aiStatus.classList.remove("error");
+  els.aiStatus.classList.toggle("ok", done === state.sections.length && state.sections.length > 0);
+  els.summarizeAll.disabled = false;
+  els.summarizeAll.style.opacity = "1";
+}
+
+// ---------- Anthropic API client ----------
+const SYSTEM_PROMPT = `You summarize sections of a research paper for a researcher skimming to decide what's worth reading carefully.
+
+For the section you are given, write 2-3 sentences capturing:
+- What the section actually says or argues
+- The key result, claim, or contribution (if any)
+- Any concrete numbers, methods, or findings that matter
+
+Be terse and state the content directly. Do NOT start with phrases like "This section discusses..." or "The authors...". Do NOT hedge. If the section is short or trivial (e.g., an acknowledgments block), say so in one sentence.`;
+
+async function summarizeSection(apiKey, section, paperTitle) {
+  // Cap section text so we don't blow up the request for unusually long
+  // sections — the bulk of the signal is in the first chunk anyway.
+  const sectionText = section.text.length > 12000
+    ? section.text.slice(0, 12000) + "\n[... truncated ...]"
+    : section.text;
+
+  const userMessage = `Paper: ${paperTitle}
+Section: ${section.title}
+
+${sectionText}`;
+
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
+    body: JSON.stringify({
+      model: MODEL,
+      max_tokens: 300,
+      // cache_control marks the system prompt for caching. Haiku 4.5 has a
+      // 4096-token minimum cacheable prefix, so this short prompt won't
+      // actually trigger caching — it's a no-op marker that will start
+      // working automatically if the prompt grows past the threshold.
+      system: [
+        { type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
+      ],
+      messages: [{ role: "user", content: userMessage }],
+    }),
+  });
+
+  if (!response.ok) {
+    let detail = `HTTP ${response.status}`;
+    try {
+      const err = await response.json();
+      if (err?.error?.message) detail = err.error.message;
+    } catch {}
+    throw new Error(detail);
   }
 
-  saveCurrentEntry();
+  const data = await response.json();
+  const textBlock = (data.content || []).find((b) => b.type === "text");
+  return (textBlock?.text || "").trim();
+}
+
+async function summarizeOne(idx) {
+  const apiKey = loadApiKey();
+  if (!apiKey) {
+    openSettings();
+    return;
+  }
+  const sec = state.sections[idx];
+  if (!sec) return;
+  sec.summarizing = true;
+  sec.error = null;
+  renderOutline();
+  try {
+    const summary = await summarizeSection(apiKey, sec, state.currentName);
+    sec.summary = summary;
+    sec.error = null;
+  } catch (err) {
+    sec.error = `Failed: ${err.message}`;
+  } finally {
+    sec.summarizing = false;
+    renderOutline();
+    saveCurrentEntry();
+  }
+}
+
+// Simple concurrency-limited batch — three in flight is a reasonable
+// compromise between speed and rate-limit safety for a hobby project.
+async function summarizeAll() {
+  const apiKey = loadApiKey();
+  if (!apiKey) {
+    openSettings();
+    return;
+  }
+  const queue = state.sections
+    .map((s, idx) => ({ s, idx }))
+    .filter(({ s }) => !s.summary && !s.summarizing);
+
+  if (queue.length === 0) return;
+
+  // Pre-flag everything so the UI shows pending state immediately.
+  for (const { s } of queue) { s.summarizing = true; s.error = null; }
+  renderOutline();
+
+  const CONCURRENCY = 3;
+  let active = 0;
+  let next = 0;
+
+  await new Promise((resolve) => {
+    const pump = () => {
+      if (next >= queue.length && active === 0) return resolve();
+      while (active < CONCURRENCY && next < queue.length) {
+        const { s, idx } = queue[next++];
+        active++;
+        summarizeSection(apiKey, s, state.currentName)
+          .then((summary) => { s.summary = summary; s.error = null; })
+          .catch((err) => { s.error = `Failed: ${err.message}`; })
+          .finally(() => {
+            s.summarizing = false;
+            active--;
+            renderOutline();
+            saveCurrentEntry();
+            pump();
+          });
+      }
+    };
+    pump();
+  });
+}
+
+// ---------- Scope (section vs full) ----------
+function enterReader(sectionIdx) {
+  if (sectionIdx === null || sectionIdx === undefined) {
+    state.scopeStart = 0;
+    state.scopeEnd = state.tokens.length;
+    state.scopeTitle = "";
+  } else {
+    const sec = state.sections[sectionIdx];
+    if (!sec) return;
+    state.scopeStart = sec.startIdx;
+    state.scopeEnd = sec.endIdx;
+    state.scopeTitle = sec.title;
+  }
+  // When jumping into a section, start at its beginning unless we have a
+  // saved position inside it (only happens on a full-paper resume).
+  if (state.index < state.scopeStart || state.index >= state.scopeEnd) {
+    state.index = state.scopeStart;
+  }
+
+  els.outline.classList.add("hidden");
+  els.reader.classList.remove("hidden");
+
+  els.wordDisplay.innerHTML = `<span class="placeholder">${(state.scopeEnd - state.scopeStart).toLocaleString()} words ${state.scopeTitle ? `in "${escapeHtml(state.scopeTitle)}"` : "ready"}. Press Play.</span>`;
+  els.progressBar.style.width = `${((state.index - state.scopeStart) / Math.max(1, state.scopeEnd - state.scopeStart)) * 100}%`;
+  els.contextText.textContent = state.sentences[state.tokens[state.index]?.sentenceIdx || 0] || "";
+}
+
+function backToOutline() {
+  pause();
+  els.reader.classList.add("hidden");
+  els.outline.classList.remove("hidden");
+  renderOutline();
 }
 
 // ---------- File loading ----------
@@ -491,6 +829,7 @@ async function loadFile(file) {
       refsText: existing.refsText || "",
       position: existing.position || 0,
       includeRefs: !!existing.includeRefs,
+      sectionsCache: existing.sectionsCache || [],
     });
     flashStatus(`Resumed at ${Math.round(100 * (existing.position || 0) / Math.max(1, existing.totalTokens || 1))}%`);
     return;
@@ -512,6 +851,7 @@ async function loadFile(file) {
       refsText,
       position: 0,
       includeRefs: false,
+      sectionsCache: [],
     });
     els.status.textContent = "";
   } catch (err) {
@@ -532,16 +872,39 @@ function resetReader() {
   pause();
   state.tokens = [];
   state.sentences = [];
+  state.sections = [];
   state.index = 0;
+  state.scopeStart = 0;
+  state.scopeEnd = 0;
+  state.scopeTitle = "";
   state.currentEntryId = null;
   state.mainText = "";
   state.refsText = "";
   els.reader.classList.add("hidden");
+  els.outline.classList.add("hidden");
   els.dropZone.classList.remove("hidden");
   els.refsBar.classList.add("hidden");
   els.fileInput.value = "";
   els.status.textContent = "";
   renderLibrary();
+}
+
+// ---------- Settings dialog ----------
+function openSettings() {
+  els.apiKeyInput.value = loadApiKey();
+  if (typeof els.settingsDialog.showModal === "function") {
+    els.settingsDialog.showModal();
+  } else {
+    els.settingsDialog.setAttribute("open", "");
+  }
+}
+
+function closeSettings() {
+  if (typeof els.settingsDialog.close === "function") {
+    els.settingsDialog.close();
+  } else {
+    els.settingsDialog.removeAttribute("open");
+  }
 }
 
 // ---------- Wiring ----------
@@ -575,17 +938,42 @@ els.libraryList.addEventListener("click", (e) => {
     refsText: entry.refsText || "",
     position: entry.position || 0,
     includeRefs: !!entry.includeRefs,
+    sectionsCache: entry.sectionsCache || [],
   });
 });
+
+els.outlineSections.addEventListener("click", (e) => {
+  const li = e.target.closest("li.outline-section");
+  if (!li) return;
+  const idx = Number(li.dataset.idx);
+  const action = e.target.closest("[data-action]")?.dataset.action;
+  if (action === "read") {
+    enterReader(idx);
+  } else if (action === "summarize") {
+    summarizeOne(idx);
+  }
+});
+
+els.outlineReadAll.addEventListener("click", () => enterReader(null));
+els.outlineBack.addEventListener("click", () => {
+  saveCurrentEntry();
+  els.outline.classList.add("hidden");
+  els.dropZone.classList.remove("hidden");
+  renderLibrary();
+});
+els.summarizeAll.addEventListener("click", summarizeAll);
+els.backToOutline.addEventListener("click", backToOutline);
 
 els.includeRefs.addEventListener("change", () => {
   if (!state.mainText) return;
   const wasPlaying = state.playing;
   pause();
   state.includeRefs = els.includeRefs.checked;
-  applyTokensFromState();
+  // Preserve existing summaries by feeding them in as cache.
+  const cache = state.sections.map((s) => ({ title: s.title, summary: s.summary }));
+  applyTokensFromState(cache);
   updateRefsBar();
-  showCurrent();
+  renderOutline();
   saveCurrentEntry();
   if (wasPlaying) play();
 });
@@ -593,7 +981,7 @@ els.includeRefs.addEventListener("change", () => {
 els.playPause.addEventListener("click", () => (state.playing ? pause() : play()));
 els.restart.addEventListener("click", () => {
   pause();
-  state.index = 0;
+  state.index = state.scopeStart;
   showCurrent();
   saveCurrentEntry();
 });
@@ -619,19 +1007,34 @@ els.mode.addEventListener("change", () => {
   showCurrent();
 });
 
+els.openSettings.addEventListener("click", openSettings);
+els.settingsCancel.addEventListener("click", closeSettings);
+els.settingsSave.addEventListener("click", () => {
+  saveApiKey(els.apiKeyInput.value.trim());
+  closeSettings();
+  updateAiStatus();
+});
+els.settingsClear.addEventListener("click", () => {
+  saveApiKey("");
+  els.apiKeyInput.value = "";
+  updateAiStatus();
+});
+
 window.addEventListener("keydown", (e) => {
   if (e.target.matches("input, select, textarea")) return;
+  // Don't capture keys while a dialog is open.
+  if (els.settingsDialog.open) return;
   if (e.code === "Space") {
+    if (els.reader.classList.contains("hidden")) return;
     e.preventDefault();
     state.playing ? pause() : play();
   } else if (e.key === "ArrowLeft") {
-    jumpSeconds(-5);
+    if (!els.reader.classList.contains("hidden")) jumpSeconds(-5);
   } else if (e.key === "ArrowRight") {
-    jumpSeconds(5);
+    if (!els.reader.classList.contains("hidden")) jumpSeconds(5);
   }
 });
 
-// Save position on tab close/navigation
 window.addEventListener("beforeunload", () => {
   if (positionSaveTimer) clearTimeout(positionSaveTimer);
   saveCurrentEntry();
