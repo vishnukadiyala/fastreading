@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>fastreading — RSVP speed reader for research papers</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<header>
+  <h1>fastreading</h1>
+  <p class="tagline">RSVP speed reader for research papers. Drop a PDF, focus on the red anchor.</p>
+</header>
+
+<main>
+  <section id="drop-zone" class="drop-zone">
+    <input type="file" id="file-input" accept="application/pdf,text/plain" hidden />
+    <label for="file-input" class="drop-label">
+      <strong>Drop a PDF or .txt here</strong>
+      <span>or click to choose a file</span>
+    </label>
+    <p id="status" class="status"></p>
+  </section>
+
+  <section id="reader" class="reader hidden">
+    <div class="reader-display">
+      <div class="anchor-rail"></div>
+      <div id="word-display" class="word-display" aria-live="polite"></div>
+      <div class="anchor-rail"></div>
+    </div>
+
+    <div class="progress">
+      <div id="progress-bar" class="progress-bar"></div>
+    </div>
+
+    <div class="controls">
+      <button id="play-pause" class="btn primary">Play</button>
+      <button id="restart" class="btn">Restart</button>
+      <button id="back" class="btn">&laquo; 10s</button>
+      <button id="fwd" class="btn">10s &raquo;</button>
+
+      <label class="control">
+        <span>WPM <output id="wpm-val">350</output></span>
+        <input type="range" id="wpm" min="100" max="900" step="25" value="350" />
+      </label>
+
+      <label class="control">
+        <span>Chunk <output id="chunk-val">1</output></span>
+        <input type="range" id="chunk" min="1" max="5" step="1" value="1" />
+      </label>
+
+      <label class="control mode">
+        <span>Mode</span>
+        <select id="mode">
+          <option value="rsvp">RSVP (single word)</option>
+          <option value="chunked">Chunked phrases</option>
+        </select>
+      </label>
+
+      <button id="reset" class="btn ghost">Load another</button>
+    </div>
+
+    <details class="context">
+      <summary>Context (current sentence)</summary>
+      <p id="context-text"></p>
+    </details>
+  </section>
+</main>
+
+<footer>
+  <small>
+    Text stays in your browser — PDFs are parsed client-side.
+    Built with <a href="https://mozilla.github.io/pdf.js/">pdf.js</a>.
+  </small>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/build/pdf.min.mjs" type="module"></script>
+<script src="app.js" type="module"></script>
+</body>
+</html>

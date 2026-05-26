@@ -1,0 +1,215 @@
+:root {
+  --bg: #0f1115;
+  --bg-elev: #181b22;
+  --fg: #e6e8ec;
+  --muted: #8a92a6;
+  --accent: #ff4d4f;
+  --border: #262a33;
+  --btn: #232734;
+  --btn-hover: #2c3142;
+  --primary: #4f8cff;
+  --primary-hover: #6aa0ff;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  min-height: 100vh;
+}
+
+header {
+  text-align: center;
+  padding: 32px 16px 8px;
+}
+header h1 {
+  margin: 0;
+  font-size: 28px;
+  letter-spacing: -0.5px;
+}
+.tagline {
+  color: var(--muted);
+  margin: 6px 0 0;
+  font-size: 14px;
+}
+
+main {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 24px 16px 80px;
+}
+
+.hidden { display: none !important; }
+
+/* Drop zone */
+.drop-zone {
+  border: 2px dashed var(--border);
+  border-radius: 14px;
+  background: var(--bg-elev);
+  padding: 48px 24px;
+  text-align: center;
+  transition: border-color 0.15s, background 0.15s;
+  cursor: pointer;
+}
+.drop-zone.dragover {
+  border-color: var(--primary);
+  background: #1a2030;
+}
+.drop-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  cursor: pointer;
+}
+.drop-label strong { font-size: 18px; }
+.drop-label span { color: var(--muted); font-size: 14px; }
+.status {
+  margin: 16px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  min-height: 1.2em;
+}
+
+/* Reader */
+.reader {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.reader-display {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 60px 24px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  min-height: 220px;
+}
+
+.anchor-rail {
+  height: 1px;
+  background: var(--border);
+}
+
+.word-display {
+  font-family: "JetBrains Mono", "Fira Code", Consolas, ui-monospace, monospace;
+  font-size: clamp(28px, 5vw, 44px);
+  line-height: 1.2;
+  text-align: center;
+  padding: 24px 0;
+  white-space: pre;
+  font-variant-ligatures: none;
+}
+.word-display .pre { color: var(--fg); }
+.word-display .orp { color: var(--accent); font-weight: 700; }
+.word-display .post { color: var(--fg); }
+.word-display .placeholder { color: var(--muted); font-size: 18px; font-family: inherit; }
+
+/* Progress */
+.progress {
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.progress-bar {
+  height: 100%;
+  width: 0%;
+  background: var(--primary);
+  transition: width 0.15s linear;
+}
+
+/* Controls */
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px 16px;
+}
+
+.btn {
+  background: var(--btn);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.btn:hover { background: var(--btn-hover); }
+.btn.primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: white;
+}
+.btn.primary:hover { background: var(--primary-hover); }
+.btn.ghost {
+  background: transparent;
+  color: var(--muted);
+  margin-left: auto;
+}
+
+.control {
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  color: var(--muted);
+  gap: 4px;
+  min-width: 130px;
+}
+.control span {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+}
+.control output { color: var(--fg); font-weight: 600; }
+.control input[type="range"] {
+  accent-color: var(--primary);
+  width: 100%;
+}
+.control.mode select {
+  background: var(--btn);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+/* Context */
+.context {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px 16px;
+  font-size: 14px;
+}
+.context summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.context p {
+  margin: 12px 0 0;
+  color: var(--fg);
+  line-height: 1.5;
+}
+
+/* Footer */
+footer {
+  text-align: center;
+  padding: 16px;
+  color: var(--muted);
+}
+footer a { color: var(--muted); }
