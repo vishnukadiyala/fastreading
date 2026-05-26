@@ -54,21 +54,24 @@ function renderWord(word) {
 }
 
 function renderChunk(words) {
-  // In chunked mode, highlight the ORP of the longest word so the eye still has an anchor.
+  // Pick the longest word as the visual anchor so the eye still has a fixation.
   let pivot = 0;
   for (let i = 1; i < words.length; i++) {
     if (words[i].length > words[pivot].length) pivot = i;
   }
-  const parts = words.map((w, idx) => {
-    if (idx !== pivot) return `<span class="pre">${escapeHtml(w)}</span>`;
-    const i = orpIndex(w);
-    return (
-      `<span class="pre">${escapeHtml(w.slice(0, i))}</span>` +
-      `<span class="orp">${escapeHtml(w[i] || "")}</span>` +
-      `<span class="post">${escapeHtml(w.slice(i + 1))}</span>`
-    );
-  });
-  els.wordDisplay.innerHTML = parts.join(" ");
+  const pivotWord = words[pivot];
+  const i = orpIndex(pivotWord);
+  const left = words.slice(0, pivot).join(" ");
+  const right = words.slice(pivot + 1).join(" ");
+
+  const preText = (left ? left + " " : "") + pivotWord.slice(0, i);
+  const orpChar = pivotWord[i] || "";
+  const postText = pivotWord.slice(i + 1) + (right ? " " + right : "");
+
+  els.wordDisplay.innerHTML =
+    `<span class="pre">${escapeHtml(preText)}</span>` +
+    `<span class="orp">${escapeHtml(orpChar)}</span>` +
+    `<span class="post">${escapeHtml(postText)}</span>`;
 }
 
 function escapeHtml(s) {
